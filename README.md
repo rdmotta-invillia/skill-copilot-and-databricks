@@ -8,7 +8,6 @@ Este treinamento apresenta a integração entre **Databricks** e **GitHub Copilo
 
 ## Agenda
 
-
 ### SQL Warehouse Serverless (40 min)
 - Setup do SQL Warehouse serverless 2X-Small
 - Integração VS Code + Databricks SQL
@@ -48,11 +47,10 @@ databricks-treinner/
 ### 🧪 SQL Warehouse Serverless (Conta Free)
 > Execute um ETL completo usando apenas SQL Warehouse serverless 2X-Small.
 
-[![](https://img.shields.io/badge/Copiar%20Exercício-%E2%86%92-1f883d?style=for-the-badge&logo=github&labelColor=197935)](https://github.com/new?template_owner=rdmotta-invillia&template_name=copilot_and_databricks&owner=%40me&name=skill-copilot-and-databricks&visibility=public)
-
 Se o repositório for criado com GitHub Actions habilitado, a trilha começa automaticamente sem etapa manual.
 
 <!-- TRAINING_ISSUE_LINK_START --> 
+[![](https://img.shields.io/badge/Acessar%20Issue%20do%20Exercício-Open-1f883d?style=for-the-badge&logo=github)](https://github.com/rdmotta-invillia/skill-copilot-and-databricks/issues/1)
 <!-- TRAINING_ISSUE_LINK_END -->
 ---  
 
