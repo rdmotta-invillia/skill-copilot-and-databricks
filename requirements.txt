@@ -1,0 +1,21 @@
+# ── PySpark + Delta Lake (core do treinamento) ───────────────────────────────
+pyspark==3.5.1
+delta-spark==3.1.0
+
+# ── Databricks SDK ────────────────────────────────────────────────────────────
+databricks-sdk==0.29.0
+databricks-connect==15.4.0
+
+# ── Dados ─────────────────────────────────────────────────────────────────────
+pandas==2.2.2
+pyarrow==16.0.0
+numpy==1.26.4
+
+# ── Notebooks no VS Code ─────────────────────────────────────────────────────
+ipykernel==6.29.4
+
+# ── Formatação (usada pela extensão Black no VS Code) ─────────────────────────
+black==24.4.2
+
+# ── Utilitários ───────────────────────────────────────────────────────────────
+python-dotenv==1.0.1

@@ -1,0 +1,186 @@
+name: "📈 Rastrear Progresso do Treinamento"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "notebooks/**"
+      - "scripts/**"
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  track-progress:
+    if: ${{ !github.event.repository.is_template }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detectar etapa e atualizar Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+
+            const createComment = async (issueNumber, body) => {
+              const comment = await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body,
+              });
+              return comment.data.id;
+            };
+
+            const updateComment = async (issueNumber, commentId, body) => {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: commentId,
+                body,
+              });
+            };
+
+            const findCommentByMarker = async (issueNumber, marker) => {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              });
+
+              return comments.find(c => c.body.includes(marker));
+            };
+
+            const changed = execSync(
+              'git diff --name-only HEAD~1 HEAD 2>/dev/null || git show --name-only --format= HEAD'
+            ).toString().trim().split('\n').filter(Boolean);
+            console.log('Arquivos alterados:', changed);
+
+            const STEP_FLOW = {
+              't1-step-01': {
+                expectedFile: 'notebooks/01_sql_warehouse_serverless/01_sql_setup_and_extract',
+                nextStepFile: 'steps/track1/step-02.md',
+                nextLabel: 't1-step-02',
+                stepName: 'Etapa 1 - Setup + Extração Bronze',
+                evaluatingMsg: 'Processando commit para validar Etapa 1...',
+                evaluatingMarker: '<!-- EVALUATING_T1_STEP_01 -->',
+                nextStepMarker: '<!-- NEXT_T1_STEP_02 -->',
+              },
+              't1-step-02': {
+                expectedFile: 'notebooks/01_sql_warehouse_serverless/02_sql_cleaning_etl',
+                nextStepFile: 'steps/track1/step-03.md',
+                nextLabel: 't1-step-03',
+                stepName: 'Etapa 2 - Limpeza + Padronização (Silver)',
+                evaluatingMsg: 'Processando commit para validar Etapa 2...',
+                evaluatingMarker: '<!-- EVALUATING_T1_STEP_02 -->',
+                nextStepMarker: '<!-- NEXT_T1_STEP_03 -->',
+              },
+              't1-step-03': {
+                expectedFile: 'notebooks/01_sql_warehouse_serverless/03_sql_gold_validation',
+                nextStepFile: 'steps/track1/step-04.md',
+                nextLabel: 't1-step-04',
+                stepName: 'Etapa 3 - Gold SQL e KPI Analítico',
+                evaluatingMsg: 'Processando commit para validar Etapa 3...',
+                evaluatingMarker: '<!-- EVALUATING_T1_STEP_03 -->',
+                nextStepMarker: '<!-- NEXT_T1_STEP_04 -->',
+                done: true,
+              },
+            };
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              labels: 'databricks-training,track-1-full',
+              state:  'open',
+              per_page: 1,
+            });
+
+            if (!issues.length) {
+              console.log('Nenhuma issue aberta. Execute o workflow start-track1 primeiro.');
+              return;
+            }
+
+            const issue = issues[0];
+            const issueLabels = issue.labels.map(l => l.name);
+            console.log('Issue #' + issue.number + ' | labels:', issueLabels);
+
+            const currentStep = ['t1-step-01', 't1-step-02', 't1-step-03', 't1-step-04']
+              .find(step => issueLabels.includes(step));
+            if (!currentStep) {
+              console.log('Nenhum label de etapa identificado na issue.');
+              return;
+            }
+
+            if (currentStep === 't1-step-04') {
+              console.log('Issue já marcada como concluída.');
+              return;
+            }
+
+            const stepConfig = STEP_FLOW[currentStep];
+
+            // Criar comentário informando que está sendo avaliado
+            await createComment(issue.number, 
+              `${stepConfig.evaluatingMarker}\n🔍 **Avaliando ${stepConfig.stepName}**\n\nCommit: [\`${context.sha.substring(0, 7)}\`](${context.repo.owner}/${context.repo.repo}/commit/${context.sha})\nAutor: @${context.actor}\n\n⏳ Aguarde a validação...`
+            );
+
+            const matchesCurrentStep = changed.some(f => f.includes(stepConfig.expectedFile));
+            if (!matchesCurrentStep) {
+              console.log('Commit não corresponde ao arquivo esperado da etapa atual.');
+              return;
+            }
+
+            console.log('✅ Validação passou! Desbloqueando: ' + stepConfig.nextStepFile + ' (next: ' + stepConfig.nextLabel + ')');
+
+            const nextStepBody = fs.readFileSync(`.github/training/${stepConfig.nextStepFile}`, 'utf8')
+              .replace(/\{\{COMMIT_SHA\}\}/g, context.sha.substring(0, 7))
+              .replace(/\{\{COMMIT_URL\}\}/g,
+                `https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}`)
+              .replace(/\{\{ACTOR\}\}/g, context.actor);
+
+            const nextStepComment = `${stepConfig.nextStepMarker}\n✅ **${stepConfig.stepName} Concluída!**\n\n---\n\n${nextStepBody}`;
+
+            // Criar comentário com o próximo step
+            await createComment(issue.number, nextStepComment);
+
+            // Remover label do step atual
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: issue.number, name: currentStep,
+            }).catch(() => {});
+
+            const addLabel = async (name, color) => {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, labels: [name],
+              }).catch(async () => {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner, repo: context.repo.repo, name, color,
+                }).catch(() => {});
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: issue.number, labels: [name],
+                });
+              });
+            };
+
+            await addLabel(stepConfig.nextLabel, stepConfig.done ? '0e8a16' : '0075ca');
+
+            if (stepConfig.done) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, state: 'closed', state_reason: 'completed',
+              });
+              console.log('Treinamento concluído! Issue #' + issue.number + ' fechada.');
+            }
+
+      - name: Resumo
+        run: |
+          echo "## 📈 Progresso registrado" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Autor:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

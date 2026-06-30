@@ -1,0 +1,183 @@
+name: "SQL Warehouse Serverless"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+jobs:
+  start-training:
+    if: ${{ !github.event.repository.is_template }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Criar ou reutilizar Issue inicial
+        id: bootstrap
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const participantName = context.repo.owner;
+            const trackLabel = 'track-1-full';
+            const stepLabel = 't1-step-01';
+
+            const labelsToCreate = [
+              { name: 'databricks-training', color: 'e4e669', description: 'Treinamento Databricks + Copilot' },
+              { name: trackLabel,            color: 'd93f0b', description: 'Trilha: SQL Warehouse Serverless' },
+              { name: 't1-step-01',          color: 'fb8500', description: 'T1 Etapa 1: Setup + Bronze SQL' },
+              { name: 't1-step-02',          color: 'fb8500', description: 'T1 Etapa 2: Silver ETL' },
+              { name: 't1-step-03',          color: 'fb8500', description: 'T1 Etapa 3: Gold SQL' },
+              { name: 't1-step-04',          color: '0e8a16', description: 'T1 Concluído!' },
+            ];
+
+            for (const label of labelsToCreate) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: label.description,
+                });
+              } catch {
+                await github.rest.issues.updateLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: label.description,
+                }).catch(() => {});
+              }
+            }
+
+            const { data: existingIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: `databricks-training,${trackLabel}`,
+              state: 'all',
+              per_page: 1,
+            });
+
+            let issueUrl = '';
+            let issueNumber = '';
+
+            if (existingIssues.length > 0) {
+              issueUrl = existingIssues[0].html_url;
+              issueNumber = String(existingIssues[0].number);
+              console.log(`Issue já existente: #${issueNumber} - ${issueUrl}`);
+            } else {
+              const stepContent = fs.readFileSync('.github/training/steps/track1/step-01.md', 'utf8');
+              const body = [
+                `## Treinamento Databricks + Copilot: SQL Serverless Free`,
+                ``,
+                ``,
+                stepContent,
+                ``,
+                `---`,
+                ``,
+                `<!-- PROGRESS_STATUS_START -->`,
+                `### Progresso da automação`,
+                `⏳ Iniciando Etapa 1 - Aguardando seu primeiro commit...`,
+                `<!-- PROGRESS_STATUS_END -->`,
+              ].join('\n');
+
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Treinamento Databricks [SQL Serverless Free] - ${participantName}`,
+                body,
+                labels: ['databricks-training', trackLabel, stepLabel],
+              });
+
+              issueUrl = issue.data.html_url;
+              issueNumber = String(issue.data.number);
+              console.log(`Issue criada: #${issueNumber} - ${issueUrl}`);             
+            }
+
+            core.setOutput('issue_url', issueUrl);
+            core.setOutput('issue_number', issueNumber);
+
+      - name: Remover botões iniciais do README
+        run: |
+          set -euo pipefail
+
+          python3 << 'PYTHON_SCRIPT'
+          import re
+
+          with open('README.md', 'r', encoding='utf-8') as f:
+              content = f.read()
+
+ 
+          # Remove o badge de "Copiar Exercício"
+          content = re.sub(
+              r'\[!\[\]\(.*?Copiar.*?Exerc.*?\)\]\(.*?template_owner.*?\)\s*\n?',
+              '',
+              content,
+              flags=re.DOTALL
+          )
+
+          # Remove linhas em branco excessivas
+          content = re.sub(r'\n\n\n+', '\n\n', content)
+
+          with open('README.md', 'w', encoding='utf-8') as f:
+              f.write(content)
+          PYTHON_SCRIPT
+
+      - name: Atualizar README com link da Issue
+        env:
+          ISSUE_URL: ${{ steps.bootstrap.outputs.issue_url }}
+        run: |
+          set -euo pipefail
+
+          if grep -q "<!-- TRAINING_ISSUE_LINK_START -->" README.md; then
+            awk -v url="$ISSUE_URL" '
+              BEGIN { inblock=0 }
+              /<!-- TRAINING_ISSUE_LINK_START -->/ {
+                print;
+                print "[![](https://img.shields.io/badge/Acessar%20Issue%20do%20Exercício-Open-1f883d?style=for-the-badge&logo=github)](" url ")";
+                inblock=1;
+                next;
+              }
+              /<!-- TRAINING_ISSUE_LINK_END -->/ {
+                inblock=0;
+                print;
+                next;
+              }
+              inblock==0 { print }
+            ' README.md > README.md.tmp
+            mv README.md.tmp README.md
+          fi
+
+      - name: Commit no README se houver mudanças
+        if: ${{ steps.bootstrap.outputs.issue_number }}
+        env:
+          ISSUE_NUMBER: ${{ steps.bootstrap.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet README.md; then
+            echo "README sem alterações"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore(training): vincula issue #$ISSUE_NUMBER no README"
+          git push
+
+      - name: Resumo
+        run: |
+          echo "## SQL Serverless Free iniciada" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Issue do exercício:** ${{ steps.bootstrap.outputs.issue_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "README atualizado com o link da issue para acesso rápido ao hands-on." >> $GITHUB_STEP_SUMMARY
