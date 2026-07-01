@@ -34,6 +34,51 @@ else
   echo "✅ Databricks CLI já disponível: $(databricks -v 2>&1 || true)"
 fi
 
+
+# ── 2. Sincronizar host no bundle do Databricks ─────────────────────────────── 
+BUNDLE_FILE=databricks.yml
+ 
+
+if [ -n "${DATABRICKS_HOST:-}" ] && [ -n "${BUNDLE_FILE}" ]; then
+  TMP_BUNDLE_FILE="$(mktemp)"
+  if awk -v new_host="${DATABRICKS_HOST}" '
+    BEGIN { in_targets=0; in_dev=0; in_workspace=0; updated=0 }
+
+    /^targets:/ { in_targets=1; in_dev=0; in_workspace=0; print; next }
+    /^[^[:space:]]/ && $0 !~ /^targets:/ { in_targets=0; in_dev=0; in_workspace=0 }
+
+    in_targets && /^  dev:/ { in_dev=1; in_workspace=0; print; next }
+    in_targets && /^  [^[:space:]].*:/ && $0 !~ /^  dev:/ { in_dev=0; in_workspace=0 }
+
+    in_targets && in_dev && /^    workspace:/ { in_workspace=1; print; next }
+    in_targets && in_dev && /^    [^[:space:]].*:/ && $0 !~ /^    workspace:/ { in_workspace=0 }
+
+    in_targets && in_dev && in_workspace && /^      host:[[:space:]]*/ {
+      print "      host: " new_host
+      updated=1
+      next
+    }
+
+    { print }
+
+    END {
+      if (!updated) {
+        exit 3
+      }
+    }
+  ' "${BUNDLE_FILE}" > "${TMP_BUNDLE_FILE}"; then
+    mv "${TMP_BUNDLE_FILE}" "${BUNDLE_FILE}"
+    echo "✅ ${BUNDLE_FILE} atualizado em targets.dev.workspace.host"
+  else
+    rm -f "${TMP_BUNDLE_FILE}"
+    echo "⚠️  Não foi possível atualizar targets.dev.workspace.host em ${BUNDLE_FILE}"
+  fi
+elif [ -z "${DATABRICKS_HOST:-}" ]; then
+  echo "⚠️  DATABRICKS_HOST não definido; bundle não será atualizado"
+else
+  echo "⚠️  Arquivo de bundle não encontrado (.databricks.yaml ou databricks.yml)"
+fi
+
 # ── 3. Configurar Databricks CLI ──────────────────────────────────────────────
 if [ -n "${DATABRICKS_HOST:-}" ] && [ -n "${DATABRICKS_TOKEN:-}" ]; then
   echo "🔧 Configurando Databricks CLI..."
