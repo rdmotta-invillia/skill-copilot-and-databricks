@@ -105,4 +105,61 @@ SELECT
 FROM silver_orders_clean o
 LEFT JOIN silver_customers_clean c
   ON o.customer_id = c.customer_id;
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Validação Silver: pedidos sem dados de cliente após LEFT JOIN
+-- MAGIC
+-- MAGIC **Objetivo:** medir o percentual de linhas com `customer_name` nulo e comparar com limite aceitável (`< 2%`).
+
+-- COMMAND ----------
+
+WITH join_quality AS (
+  SELECT
+    COUNT(*) AS total_orders,
+    SUM(CASE WHEN customer_name IS NULL THEN 1 ELSE 0 END) AS orders_without_customer_name
+  FROM silver_orders_enriched
+)
+SELECT
+  total_orders,
+  orders_without_customer_name,
+  ROUND((orders_without_customer_name * 100.0) / NULLIF(total_orders, 0), 2) AS pct_without_customer_name,
+  2.00 AS accepted_limit_pct,
+  CASE
+    WHEN (orders_without_customer_name * 100.0) / NULLIF(total_orders, 0) < 2 THEN 'PASS'
+    ELSE 'ALERT'
+  END AS validation_status
+FROM join_quality;
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Validação de regras de domínio (filtros da Silver)
+-- MAGIC
+-- MAGIC **Objetivo:** garantir que as regras aplicadas em `silver_orders_clean` realmente se mantêm no enriquecido.
+
+-- COMMAND ----------
+
+WITH domain_rules_validation AS (
+  SELECT
+    COUNT(*) AS total_orders,
+    SUM(CASE WHEN order_id IS NULL THEN 1 ELSE 0 END) AS invalid_order_id,
+    SUM(CASE WHEN customer_id IS NULL THEN 1 ELSE 0 END) AS invalid_customer_id,
+    SUM(CASE WHEN quantity NOT BETWEEN 1 AND 100 THEN 1 ELSE 0 END) AS invalid_quantity,
+    SUM(CASE WHEN unit_price NOT BETWEEN 0.01 AND 50000 THEN 1 ELSE 0 END) AS invalid_unit_price
+  FROM silver_orders_enriched
+)
+SELECT
+  total_orders,
+  invalid_order_id,
+  invalid_customer_id,
+  invalid_quantity,
+  invalid_unit_price,
+  (invalid_order_id + invalid_customer_id + invalid_quantity + invalid_unit_price) AS total_violations,
+  CASE
+    WHEN (invalid_order_id + invalid_customer_id + invalid_quantity + invalid_unit_price) = 0 THEN 'PASS'
+    ELSE 'ALERT'
+  END AS validation_status
+FROM domain_rules_validation;
  
